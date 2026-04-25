@@ -4,15 +4,32 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Register — Quiz Master</title>
-    <meta name="description" content="Create your account to take quizzes">
+    <meta name="description" content="Create your account for Quiz Master">
     <link rel="stylesheet" href="/static/css/styles.css">
+    <style>
+        .role-toggle { display: flex; gap: 0; margin-bottom: 2rem; border-radius: var(--radius-md); overflow: hidden; border: 1px solid var(--border-glass); }
+        .role-btn { flex: 1; padding: 0.75rem 1rem; text-align: center; font-family: 'Outfit', sans-serif; font-weight: 600; font-size: 0.9rem; cursor: pointer; background: var(--bg-glass); color: var(--text-secondary); border: none; transition: var(--transition); }
+        .role-btn.active { background: var(--accent-gradient); color: #fff; }
+        .role-btn:hover:not(.active) { background: rgba(99,102,241,0.1); color: var(--text-primary); }
+        .role-icon { font-size: 1.1rem; margin-right: 0.4rem; }
+    </style>
 </head>
 <body>
     <div class="auth-container">
         <div class="auth-card">
             <div class="auth-logo">⚡ Quiz Master</div>
             <h1 class="auth-title">Create Account</h1>
-            <p class="auth-subtitle">Register to take quizzes</p>
+            <p class="auth-subtitle" id="auth-subtitle">Register to take quizzes</p>
+
+            <!-- Role Toggle -->
+            <div class="role-toggle">
+                <button class="role-btn active" id="btn-student" onclick="setRole('participant')">
+                    <span class="role-icon">🎓</span> Student
+                </button>
+                <button class="role-btn" id="btn-admin" onclick="setRole('admin')">
+                    <span class="role-icon">🛡️</span> Admin
+                </button>
+            </div>
 
             <form id="register-form">
                 <div class="form-group">
@@ -27,7 +44,7 @@
                     <label class="form-label" for="password">Password</label>
                     <input type="password" id="password" class="form-input" placeholder="Min 6 characters" required minlength="6">
                 </div>
-                <button type="submit" class="btn btn-primary btn-block btn-lg" id="submit-btn">Create Account</button>
+                <button type="submit" class="btn btn-primary btn-block btn-lg" id="submit-btn">Register as Student</button>
             </form>
 
             <div class="auth-footer">
@@ -38,6 +55,16 @@
 
     <script src="/static/js/utils.js"></script>
     <script>
+        let selectedRole = 'participant';
+
+        function setRole(role) {
+            selectedRole = role;
+            document.getElementById('btn-student').classList.toggle('active', role === 'participant');
+            document.getElementById('btn-admin').classList.toggle('active', role === 'admin');
+            document.getElementById('submit-btn').textContent = role === 'admin' ? 'Register as Admin' : 'Register as Student';
+            document.getElementById('auth-subtitle').textContent = role === 'admin' ? 'Register to manage quizzes' : 'Register to take quizzes';
+        }
+
         // Preserve the quiz redirect URL if present
         const params = new URLSearchParams(window.location.search);
         const redirect = params.get('redirect');
@@ -46,6 +73,7 @@
             e.preventDefault();
             const btn = document.getElementById('submit-btn');
             btn.disabled = true;
+            const originalText = btn.textContent;
             btn.textContent = 'Creating account...';
 
             try {
@@ -56,6 +84,7 @@
                         name: document.getElementById('name').value,
                         email: document.getElementById('email').value,
                         password: document.getElementById('password').value,
+                        role: selectedRole,
                     }),
                 });
 
@@ -64,7 +93,7 @@
                     setToken(data.access_token);
                     showToast('Account created!', 'success');
                     setTimeout(() => {
-                        window.location.href = redirect || '/dashboard';
+                        window.location.href = selectedRole === 'admin' ? '/admin' : (redirect || '/dashboard');
                     }, 300);
                 } else {
                     showToast(data.detail || 'Registration failed', 'error');
@@ -74,7 +103,7 @@
             }
 
             btn.disabled = false;
-            btn.textContent = 'Create Account';
+            btn.textContent = originalText;
         });
     </script>
 </body>

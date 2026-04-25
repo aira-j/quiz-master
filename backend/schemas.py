@@ -11,6 +11,7 @@ class UserCreate(BaseModel):
     name: str
     email: str
     password: str
+    role: Optional[str] = "participant"
 
 class AdminCreate(BaseModel):
     name: str

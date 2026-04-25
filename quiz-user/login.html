@@ -4,8 +4,15 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Login — Quiz Master</title>
-    <meta name="description" content="Login to the Quiz Master">
+    <meta name="description" content="Login to Quiz Master">
     <link rel="stylesheet" href="/static/css/styles.css">
+    <style>
+        .role-toggle { display: flex; gap: 0; margin-bottom: 2rem; border-radius: var(--radius-md); overflow: hidden; border: 1px solid var(--border-glass); }
+        .role-btn { flex: 1; padding: 0.75rem 1rem; text-align: center; font-family: 'Outfit', sans-serif; font-weight: 600; font-size: 0.9rem; cursor: pointer; background: var(--bg-glass); color: var(--text-secondary); border: none; transition: var(--transition); }
+        .role-btn.active { background: var(--accent-gradient); color: #fff; }
+        .role-btn:hover:not(.active) { background: rgba(99,102,241,0.1); color: var(--text-primary); }
+        .role-icon { font-size: 1.1rem; margin-right: 0.4rem; }
+    </style>
 </head>
 <body>
     <div class="auth-container">
@@ -13,6 +20,16 @@
             <div class="auth-logo">⚡ Quiz Master</div>
             <h1 class="auth-title">Welcome Back</h1>
             <p class="auth-subtitle">Sign in to your account</p>
+
+            <!-- Role Toggle -->
+            <div class="role-toggle">
+                <button class="role-btn active" id="btn-student" onclick="setRole('student')">
+                    <span class="role-icon">🎓</span> Student
+                </button>
+                <button class="role-btn" id="btn-admin" onclick="setRole('admin')">
+                    <span class="role-icon">🛡️</span> Admin
+                </button>
+            </div>
 
             <form id="login-form">
                 <div class="form-group">
@@ -23,17 +40,31 @@
                     <label class="form-label" for="password">Password</label>
                     <input type="password" id="password" class="form-input" placeholder="Your password" required>
                 </div>
-                <button type="submit" class="btn btn-primary btn-block btn-lg" id="submit-btn">Sign In</button>
+                <button type="submit" class="btn btn-primary btn-block btn-lg" id="submit-btn">Sign In as Student</button>
             </form>
 
-            <div class="auth-footer">
+            <div class="auth-footer" id="footer-student">
                 Don't have an account? <a href="/register">Register here</a>
+            </div>
+            <div class="auth-footer hidden" id="footer-admin">
+                <span style="color: var(--text-muted); font-size: 0.85rem;">Admin accounts are created during initial setup</span>
             </div>
         </div>
     </div>
 
     <script src="/static/js/utils.js"></script>
     <script>
+        let selectedRole = 'student';
+
+        function setRole(role) {
+            selectedRole = role;
+            document.getElementById('btn-student').classList.toggle('active', role === 'student');
+            document.getElementById('btn-admin').classList.toggle('active', role === 'admin');
+            document.getElementById('submit-btn').textContent = role === 'admin' ? 'Sign In as Admin' : 'Sign In as Student';
+            document.getElementById('footer-student').classList.toggle('hidden', role === 'admin');
+            document.getElementById('footer-admin').classList.toggle('hidden', role === 'student');
+        }
+
         document.addEventListener('DOMContentLoaded', async () => {
             // Check if admin exists; if not, redirect to setup
             try {
@@ -76,6 +107,23 @@
                 if (res.ok) {
                     setToken(data.access_token);
                     const user = await getCurrentUser();
+
+                    // Validate role matches selection
+                    if (selectedRole === 'admin' && user.role !== 'admin') {
+                        clearToken();
+                        showToast('This account is not an admin', 'error');
+                        btn.disabled = false;
+                        setRole(selectedRole);
+                        return;
+                    }
+                    if (selectedRole === 'student' && user.role === 'admin') {
+                        clearToken();
+                        showToast('This is an admin account — switch to Admin tab', 'error');
+                        btn.disabled = false;
+                        setRole(selectedRole);
+                        return;
+                    }
+
                     showToast('Login successful!', 'success');
                     setTimeout(() => {
                         window.location.href = user.role === 'admin' ? '/admin' : '/dashboard';
@@ -88,7 +136,7 @@
             }
 
             btn.disabled = false;
-            btn.textContent = 'Sign In';
+            setRole(selectedRole);
         });
     </script>
 </body>

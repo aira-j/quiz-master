@@ -60,7 +60,7 @@ async def register(user: schemas.UserCreate, db: Session = Depends(get_db)):
         name=user.name,
         email=user.email,
         password_hash=hash_password(user.password),
-        role="participant",
+        role=user.role if user.role else "participant",
     )
     db.add(db_user)
     db.commit()
