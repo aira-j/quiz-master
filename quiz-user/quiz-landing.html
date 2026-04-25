@@ -1,0 +1,80 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Quiz — Quiz Platform</title>
+    <link rel="stylesheet" href="/static/css/styles.css">
+</head>
+<body>
+    <div class="auth-container">
+        <div class="auth-card" style="max-width: 520px;">
+            <div class="auth-logo">⚡ QuizPlatform</div>
+            <div id="loading" class="loading-overlay"><div class="spinner"></div></div>
+            <div id="quiz-info" class="hidden">
+                <h1 class="auth-title" id="quiz-title"></h1>
+                <p class="auth-subtitle" id="quiz-desc"></p>
+                <div class="stat-row" style="margin: 1.5rem 0;">
+                    <div class="stat-card"><div class="stat-value" id="quiz-time">-</div><div class="stat-label">Minutes</div></div>
+                    <div class="stat-card"><div class="stat-value" id="quiz-questions">-</div><div class="stat-label">Questions</div></div>
+                </div>
+                <div style="background: var(--bg-glass); border-radius: var(--radius-sm); padding: 1rem; margin-bottom: 1.5rem; font-size: 0.85rem; color: var(--text-secondary);">
+                    <strong style="color: var(--warning);">⚠️ Rules:</strong>
+                    <ul style="margin-top: 0.5rem; padding-left: 1.2rem;">
+                        <li>Fullscreen mode is mandatory</li>
+                        <li>Tab switching is monitored</li>
+                        <li>Face detection is active via webcam</li>
+                        <li>2 violations = automatic submission</li>
+                        <li>Copy/paste is disabled</li>
+                    </ul>
+                </div>
+                <button class="btn btn-primary btn-block btn-lg" id="start-btn" onclick="startQuiz()">Start Quiz</button>
+            </div>
+            <div id="error-msg" class="hidden text-center" style="padding: 2rem 0;">
+                <p style="font-size: 1.1rem; color: var(--danger); margin-bottom: 1rem;" id="error-text"></p>
+                <a href="/login" class="btn btn-secondary">Go to Login</a>
+            </div>
+        </div>
+    </div>
+
+    <script src="/static/js/utils.js"></script>
+    <script>
+        const shareToken = window.location.pathname.split('/').pop();
+
+        document.addEventListener('DOMContentLoaded', async () => {
+            try {
+                const res = await fetch(`/api/quizzes/share/${shareToken}`);
+                if (!res.ok) {
+                    showError('This quiz is not available or has expired.');
+                    return;
+                }
+                const quiz = await res.json();
+                document.getElementById('quiz-title').textContent = quiz.title;
+                document.getElementById('quiz-desc').textContent = quiz.description || '';
+                document.getElementById('quiz-time').textContent = quiz.time_limit;
+                document.getElementById('quiz-questions').textContent = quiz.question_count;
+                document.getElementById('loading').classList.add('hidden');
+                document.getElementById('quiz-info').classList.remove('hidden');
+            } catch (e) {
+                showError('Failed to load quiz info.');
+            }
+        });
+
+        function showError(msg) {
+            document.getElementById('loading').classList.add('hidden');
+            document.getElementById('error-text').textContent = msg;
+            document.getElementById('error-msg').classList.remove('hidden');
+        }
+
+        async function startQuiz() {
+            const token = getToken();
+            if (!token) {
+                window.location.href = `/register?redirect=/quiz/${shareToken}`;
+                return;
+            }
+            // Navigate to quiz session
+            window.location.href = `/quiz/${shareToken}/session`;
+        }
+    </script>
+</body>
+</html>

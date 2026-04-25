@@ -1,0 +1,484 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Quiz Session — Quiz Platform</title>
+    <link rel="stylesheet" href="/static/css/styles.css">
+    <script defer src="https://cdn.jsdelivr.net/npm/face-api.js@0.22.2/dist/face-api.min.js"></script>
+    <style>
+        body { padding-top: 60px; }
+        .quiz-body { display: flex; gap: 2rem; max-width: 1100px; margin: 1.5rem auto; padding: 0 1.5rem; }
+        .quiz-main { flex: 1; }
+        .quiz-sidebar { width: 260px; flex-shrink: 0; }
+        .question-display { background: var(--bg-card); border: 1px solid var(--border-glass); border-radius: var(--radius-lg); padding: 2rem; }
+        .question-text { font-size: 1.15rem; font-weight: 500; margin-bottom: 1.5rem; line-height: 1.7; }
+        .question-meta { font-size: 0.8rem; color: var(--text-muted); margin-bottom: 1rem; }
+        .nav-buttons { display: flex; justify-content: space-between; margin-top: 1.5rem; }
+        .sidebar-card { background: var(--bg-card); border: 1px solid var(--border-glass); border-radius: var(--radius-lg); padding: 1.5rem; margin-bottom: 1rem; }
+        @media (max-width: 768px) {
+            .quiz-body { flex-direction: column; }
+            .quiz-sidebar { width: 100%; order: -1; }
+        }
+    </style>
+</head>
+<body>
+    <!-- Timer Bar -->
+    <div class="quiz-timer">
+        <div class="flex items-center gap-2">
+            <span style="font-weight:600; color: var(--text-secondary);">⚡ QuizPlatform</span>
+            <span class="save-indicator" id="save-status">—</span>
+        </div>
+        <div class="timer-display" id="timer">--:--</div>
+        <button class="btn btn-danger btn-sm" onclick="confirmSubmit()">Submit Quiz</button>
+        <div class="timer-progress" id="timer-progress" style="width: 100%;"></div>
+    </div>
+
+    <!-- Webcam preview -->
+    <div class="webcam-preview" id="webcam-container" style="display:none;">
+        <video id="webcam-video" autoplay muted playsinline></video>
+        <div class="webcam-status" id="webcam-status"></div>
+    </div>
+
+    <div class="quiz-body">
+        <!-- Main question area -->
+        <div class="quiz-main">
+            <div class="question-display">
+                <div class="question-meta" id="question-meta">Question 1 of -</div>
+                <div class="question-text" id="question-text">Loading...</div>
+                <div id="options-container"></div>
+                <div id="text-input-container" class="hidden">
+                    <textarea class="form-textarea" id="text-answer" placeholder="Type your answer here..." rows="4"></textarea>
+                </div>
+            </div>
+            <div class="nav-buttons">
+                <button class="btn btn-secondary" id="prev-btn" onclick="navigate(-1)" disabled>← Previous</button>
+                <button class="btn btn-secondary" id="flag-btn" onclick="toggleFlag()">🚩 Flag</button>
+                <button class="btn btn-primary" id="next-btn" onclick="navigate(1)">Next →</button>
+            </div>
+        </div>
+
+        <!-- Sidebar -->
+        <div class="quiz-sidebar">
+            <div class="sidebar-card">
+                <h3 style="font-size: 0.9rem; color: var(--text-secondary); margin-bottom: 0.75rem;">Question Palette</h3>
+                <div class="question-palette" id="palette"></div>
+                <div class="mt-2" style="font-size: 0.75rem; color: var(--text-muted);">
+                    <span style="color: var(--success);">■</span> Answered &nbsp;
+                    <span style="color: var(--warning);">■</span> Flagged &nbsp;
+                    <span style="color: var(--text-muted);">■</span> Not answered
+                </div>
+            </div>
+            <div class="sidebar-card">
+                <div class="flex justify-between" style="font-size: 0.85rem;">
+                    <span class="text-muted">Answered</span><span id="answered-count">0</span>
+                </div>
+                <div class="flex justify-between mt-1" style="font-size: 0.85rem;">
+                    <span class="text-muted">Flagged</span><span id="flagged-count">0</span>
+                </div>
+                <div class="flex justify-between mt-1" style="font-size: 0.85rem;">
+                    <span class="text-muted">Violations</span><span id="violation-count" style="color: var(--danger);">0</span>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Submit Confirmation Modal -->
+    <div class="modal-overlay" id="submit-modal">
+        <div class="modal">
+            <h3 class="modal-title">Submit Quiz?</h3>
+            <p class="text-muted mb-2" id="submit-summary">You have answered 0 out of 0 questions.</p>
+            <p style="color: var(--warning); font-size: 0.85rem;">⚠️ This action cannot be undone.</p>
+            <div class="modal-actions">
+                <button class="btn btn-secondary" onclick="closeSubmitModal()">Cancel</button>
+                <button class="btn btn-danger" onclick="submitQuiz(false)">Submit</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Violation Warning Banner -->
+    <div class="violation-banner hidden" id="violation-banner"></div>
+
+    <script src="/static/js/utils.js"></script>
+    <script>
+        // ── State ──
+        let submissionId = null;
+        let quizId = null;
+        let questions = [];
+        let answers = {};  // { questionId: { selected_options: [], text_response: '' } }
+        let flagged = new Set();
+        let currentIndex = 0;
+        let timeRemaining = 0;
+        let totalTime = 0;
+        let timerInterval = null;
+        let autoSaveInterval = null;
+        let violationCount = 0;
+        let isSubmitted = false;
+        const shareToken = window.location.pathname.split('/')[2];
+
+        document.addEventListener('DOMContentLoaded', async () => {
+            const user = await checkAuthAndRedirect();
+            if (!user) return;
+
+            // Start quiz session
+            try {
+                const res = await fetchAPI(`/api/session/start/${shareToken}`, { method: 'POST' });
+                if (!res || !res.ok) {
+                    const err = await res.json();
+                    showToast(err.detail || 'Cannot start quiz', 'error');
+                    setTimeout(() => window.location.href = `/quiz/${shareToken}`, 2000);
+                    return;
+                }
+
+                const data = await res.json();
+                submissionId = data.submission_id;
+                quizId = data.quiz_id;
+                questions = data.questions;
+                totalTime = data.time_limit * 60;
+                violationCount = data.violation_count || 0;
+
+                // Load saved answers
+                if (data.saved_answers) {
+                    data.saved_answers.forEach(a => {
+                        answers[a.question_id] = {
+                            selected_options: a.selected_options || [],
+                            text_response: a.text_response || '',
+                        };
+                    });
+                }
+
+                // Calculate remaining time
+                const startedAt = new Date(data.started_at);
+                const elapsed = (Date.now() - startedAt.getTime()) / 1000;
+                timeRemaining = Math.max(0, totalTime - elapsed);
+
+                // Initialize
+                document.getElementById('violation-count').textContent = violationCount;
+                buildPalette();
+                showQuestion(0);
+                startTimer();
+                startAutoSave();
+                initProctoring();
+                initWebcam();
+
+            } catch (e) {
+                showToast('Failed to start quiz', 'error');
+            }
+        });
+
+        // ── Questions ──
+        function showQuestion(index) {
+            if (index < 0 || index >= questions.length) return;
+            currentIndex = index;
+            const q = questions[index];
+            const answer = answers[q.id] || { selected_options: [], text_response: '' };
+
+            document.getElementById('question-meta').textContent = `Question ${index + 1} of ${questions.length}`;
+            document.getElementById('question-text').textContent = q.text;
+
+            // Options
+            const optContainer = document.getElementById('options-container');
+            const textContainer = document.getElementById('text-input-container');
+
+            if (q.type === 'text') {
+                optContainer.innerHTML = '';
+                textContainer.classList.remove('hidden');
+                document.getElementById('text-answer').value = answer.text_response || '';
+                document.getElementById('text-answer').oninput = (e) => {
+                    if (!answers[q.id]) answers[q.id] = { selected_options: [], text_response: '' };
+                    answers[q.id].text_response = e.target.value;
+                    updatePalette();
+                };
+            } else {
+                textContainer.classList.add('hidden');
+                const isMulti = q.type === 'mcq_multi';
+                const indicatorClass = isMulti ? 'option-checkbox' : 'option-radio';
+
+                optContainer.innerHTML = q.options.map(o => {
+                    const isSelected = (answer.selected_options || []).includes(o.id);
+                    return `<div class="option-item ${isSelected ? 'selected' : ''}" onclick="selectOption(${q.id}, ${o.id}, '${q.type}')">
+                        <div class="${indicatorClass}"></div>
+                        <div class="option-text">${o.text}</div>
+                    </div>`;
+                }).join('');
+            }
+
+            // Nav buttons
+            document.getElementById('prev-btn').disabled = index === 0;
+            document.getElementById('next-btn').textContent = index === questions.length - 1 ? 'Finish' : 'Next →';
+            document.getElementById('flag-btn').textContent = flagged.has(q.id) ? '🚩 Unflag' : '🚩 Flag';
+
+            // Update palette active
+            document.querySelectorAll('.palette-item').forEach((el, i) => {
+                el.classList.toggle('active', i === index);
+            });
+
+            updateCounts();
+        }
+
+        function selectOption(questionId, optionId, type) {
+            if (!answers[questionId]) answers[questionId] = { selected_options: [], text_response: '' };
+
+            if (type === 'mcq_single' || type === 'tf') {
+                answers[questionId].selected_options = [optionId];
+            } else {
+                const opts = answers[questionId].selected_options;
+                const idx = opts.indexOf(optionId);
+                if (idx > -1) opts.splice(idx, 1);
+                else opts.push(optionId);
+            }
+
+            showQuestion(currentIndex); // re-render
+        }
+
+        function navigate(dir) {
+            const newIndex = currentIndex + dir;
+            if (newIndex >= questions.length) {
+                confirmSubmit();
+                return;
+            }
+            showQuestion(newIndex);
+        }
+
+        function toggleFlag() {
+            const qId = questions[currentIndex].id;
+            if (flagged.has(qId)) flagged.delete(qId);
+            else flagged.add(qId);
+            showQuestion(currentIndex);
+            updatePalette();
+        }
+
+        // ── Palette ──
+        function buildPalette() {
+            const palette = document.getElementById('palette');
+            palette.innerHTML = questions.map((q, i) =>
+                `<div class="palette-item" onclick="showQuestion(${i})">${i + 1}</div>`
+            ).join('');
+            updatePalette();
+        }
+
+        function updatePalette() {
+            const items = document.querySelectorAll('.palette-item');
+            questions.forEach((q, i) => {
+                const el = items[i];
+                if (!el) return;
+                el.className = 'palette-item';
+                if (i === currentIndex) el.classList.add('active');
+                if (isAnswered(q.id)) el.classList.add('answered');
+                if (flagged.has(q.id)) el.classList.add('flagged');
+            });
+            updateCounts();
+        }
+
+        function isAnswered(qId) {
+            const a = answers[qId];
+            if (!a) return false;
+            return (a.selected_options && a.selected_options.length > 0) || (a.text_response && a.text_response.trim().length > 0);
+        }
+
+        function updateCounts() {
+            const answered = questions.filter(q => isAnswered(q.id)).length;
+            document.getElementById('answered-count').textContent = answered;
+            document.getElementById('flagged-count').textContent = flagged.size;
+        }
+
+        // ── Timer ──
+        function startTimer() {
+            updateTimerDisplay();
+            timerInterval = setInterval(() => {
+                timeRemaining--;
+                updateTimerDisplay();
+                if (timeRemaining <= 0) {
+                    clearInterval(timerInterval);
+                    submitQuiz(true);
+                }
+            }, 1000);
+        }
+
+        function updateTimerDisplay() {
+            const el = document.getElementById('timer');
+            const mins = Math.floor(timeRemaining / 60);
+            const secs = Math.floor(timeRemaining % 60);
+            el.textContent = `${mins}:${String(secs).padStart(2, '0')}`;
+
+            el.className = 'timer-display';
+            if (timeRemaining < 60) el.classList.add('danger');
+            else if (timeRemaining < 300) el.classList.add('warning');
+
+            const progress = (timeRemaining / totalTime) * 100;
+            document.getElementById('timer-progress').style.width = progress + '%';
+        }
+
+        // ── Auto-Save ──
+        function startAutoSave() {
+            autoSaveInterval = setInterval(saveAnswers, 30000);
+        }
+
+        async function saveAnswers() {
+            if (isSubmitted) return;
+            const status = document.getElementById('save-status');
+            status.className = 'save-indicator saving';
+            status.textContent = '⏳ Saving...';
+
+            const answerList = Object.entries(answers).map(([qId, a]) => ({
+                question_id: parseInt(qId),
+                selected_options: a.selected_options,
+                text_response: a.text_response,
+            }));
+
+            try {
+                await fetchAPI(`/api/session/${submissionId}/save`, {
+                    method: 'POST',
+                    body: JSON.stringify({ answers: answerList }),
+                });
+                status.className = 'save-indicator saved';
+                status.textContent = '✓ Saved';
+            } catch {
+                status.className = 'save-indicator';
+                status.textContent = '⚠ Save failed';
+            }
+        }
+
+        // ── Submit ──
+        function confirmSubmit() {
+            const answered = questions.filter(q => isAnswered(q.id)).length;
+            document.getElementById('submit-summary').textContent =
+                `You have answered ${answered} out of ${questions.length} questions.`;
+            document.getElementById('submit-modal').classList.add('active');
+        }
+
+        function closeSubmitModal() {
+            document.getElementById('submit-modal').classList.remove('active');
+        }
+
+        async function submitQuiz(auto = false) {
+            if (isSubmitted) return;
+            isSubmitted = true;
+            clearInterval(timerInterval);
+            clearInterval(autoSaveInterval);
+            closeSubmitModal();
+
+            // Save answers first
+            const answerList = Object.entries(answers).map(([qId, a]) => ({
+                question_id: parseInt(qId),
+                selected_options: a.selected_options,
+                text_response: a.text_response,
+            }));
+
+            try {
+                await fetchAPI(`/api/session/${submissionId}/save`, {
+                    method: 'POST',
+                    body: JSON.stringify({ answers: answerList }),
+                });
+            } catch {}
+
+            // Submit
+            try {
+                const res = await fetchAPI(`/api/session/${submissionId}/submit?auto_submitted=${auto}`, {
+                    method: 'POST',
+                });
+                if (res && res.ok) {
+                    showToast(auto ? 'Quiz auto-submitted' : 'Quiz submitted!', auto ? 'warning' : 'success');
+                    setTimeout(() => window.location.href = `/results/${submissionId}`, 1000);
+                }
+            } catch {
+                showToast('Submission failed — please contact support', 'error');
+            }
+        }
+
+        // ── Proctoring ──
+        function initProctoring() {
+            // Fullscreen
+            try { document.documentElement.requestFullscreen(); } catch {}
+            document.addEventListener('fullscreenchange', () => {
+                if (!document.fullscreenElement && !isSubmitted) logViolation('fullscreen_exit');
+            });
+
+            // Tab switch
+            document.addEventListener('visibilitychange', () => {
+                if (document.hidden && !isSubmitted) logViolation('tab_switch');
+            });
+            window.addEventListener('blur', () => { if (!isSubmitted) logViolation('tab_switch'); });
+
+            // Right-click
+            document.addEventListener('contextmenu', e => e.preventDefault());
+
+            // Copy-paste
+            document.addEventListener('keydown', e => {
+                if ((e.ctrlKey || e.metaKey) && ['c', 'v', 'a', 'x'].includes(e.key.toLowerCase())) {
+                    e.preventDefault();
+                }
+            });
+            ['copy', 'cut', 'paste'].forEach(evt => document.addEventListener(evt, e => e.preventDefault()));
+        }
+
+        async function logViolation(type) {
+            violationCount++;
+            document.getElementById('violation-count').textContent = violationCount;
+
+            // Show warning banner
+            const banner = document.getElementById('violation-banner');
+            banner.textContent = `⚠ Violation detected: ${type.replace('_', ' ')} (${violationCount}/2)`;
+            banner.classList.remove('hidden');
+            setTimeout(() => banner.classList.add('hidden'), 3000);
+
+            try {
+                const res = await fetchAPI(`/api/session/${submissionId}/proctor`, {
+                    method: 'POST',
+                    body: JSON.stringify({ event_type: type }),
+                });
+                if (res && res.ok) {
+                    const data = await res.json();
+                    if (data.auto_submitted) {
+                        submitQuiz(true);
+                    }
+                }
+            } catch {}
+        }
+
+        // ── Webcam / Face Detection ──
+        let faceDetectionInterval = null;
+
+        async function initWebcam() {
+            try {
+                const stream = await navigator.mediaDevices.getUserMedia({ video: true });
+                const video = document.getElementById('webcam-video');
+                video.srcObject = stream;
+                document.getElementById('webcam-container').style.display = 'block';
+
+                // Load face-api.js models
+                if (typeof faceapi !== 'undefined') {
+                    await faceapi.nets.tinyFaceDetector.loadFromUri('/static/models');
+                    console.log('Face detection models loaded');
+                    // Start face detection every 5 seconds
+                    faceDetectionInterval = setInterval(() => detectFaces(video), 5000);
+                } else {
+                    console.log('face-api.js not loaded, skipping face detection');
+                }
+            } catch (e) {
+                console.log('Webcam not available:', e.message);
+            }
+        }
+
+        async function detectFaces(video) {
+            if (isSubmitted || typeof faceapi === 'undefined') return;
+            try {
+                const detections = await faceapi.detectAllFaces(video, new faceapi.TinyFaceDetectorOptions());
+                const statusEl = document.getElementById('webcam-status');
+
+                if (detections.length === 0) {
+                    statusEl.classList.add('warning');
+                    logViolation('face_absent');
+                } else if (detections.length > 1) {
+                    statusEl.classList.add('warning');
+                    logViolation('face_multiple');
+                } else {
+                    statusEl.classList.remove('warning');
+                }
+            } catch (e) {
+                console.log('Face detection error:', e.message);
+            }
+        }
+    </script>
+</body>
+</html>

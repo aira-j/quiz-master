@@ -1,0 +1,29 @@
+# Python
+__pycache__/
+*.py[cod]
+*.so
+venv/
+.venv/
+*.egg-info/
+dist/
+build/
+
+# Database
+*.db
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+.DS_Store
+
+# Environment
+.env
+*.env
+
+# Face-api models (downloaded at runtime)
+quiz-user/static/models/
+
+# Misc
+*.log

@@ -1,0 +1,95 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>My Dashboard — Quiz Platform</title>
+    <link rel="stylesheet" href="/static/css/styles.css">
+</head>
+<body>
+    <div class="page-container">
+        <nav class="navbar">
+            <a href="/dashboard" class="navbar-brand">⚡ QuizPlatform</a>
+            <div class="navbar-links">
+                <a href="/dashboard">Dashboard</a>
+                <button onclick="logout()">Logout</button>
+            </div>
+        </nav>
+
+        <div class="page-content">
+            <h1 class="mb-3">My Dashboard</h1>
+
+            <div class="stat-row" id="stats-row">
+                <div class="stat-card"><div class="stat-value" id="stat-total">-</div><div class="stat-label">Quizzes Taken</div></div>
+                <div class="stat-card"><div class="stat-value" id="stat-avg">-</div><div class="stat-label">Avg Score</div></div>
+                <div class="stat-card"><div class="stat-value" id="stat-rank">-</div><div class="stat-label">Best Rank</div></div>
+            </div>
+
+            <div class="card">
+                <div class="card-header">
+                    <h2 class="card-title">Completed Quizzes</h2>
+                </div>
+                <div id="quizzes-list">
+                    <div class="loading-overlay"><div class="spinner"></div></div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script src="/static/js/utils.js"></script>
+    <script>
+        document.addEventListener('DOMContentLoaded', async () => {
+            const user = await checkAuthAndRedirect();
+            if (!user) return;
+
+            // Load stats
+            const statsRes = await fetchAPI('/api/dashboard/stats');
+            if (statsRes && statsRes.ok) {
+                const stats = await statsRes.json();
+                document.getElementById('stat-total').textContent = stats.total_quizzes_taken;
+                document.getElementById('stat-avg').textContent = stats.average_score.toFixed(1);
+                document.getElementById('stat-rank').textContent = stats.best_rank || '--';
+            }
+
+            // Load quizzes
+            const quizzesRes = await fetchAPI('/api/dashboard/quizzes');
+            const container = document.getElementById('quizzes-list');
+
+            if (!quizzesRes || !quizzesRes.ok) {
+                container.innerHTML = '<p class="text-muted text-center" style="padding: 2rem;">Failed to load</p>';
+                return;
+            }
+
+            const quizzes = await quizzesRes.json();
+            if (quizzes.length === 0) {
+                container.innerHTML = '<p class="text-muted text-center" style="padding: 2rem;">No completed quizzes yet. Take a quiz to see your results here!</p>';
+                return;
+            }
+
+            container.innerHTML = `
+                <div class="table-container">
+                    <table>
+                        <thead><tr><th>Quiz</th><th>Score</th><th>Time</th><th>Rank</th><th>Date</th><th>Actions</th></tr></thead>
+                        <tbody>
+                            ${quizzes.map(q => `
+                                <tr>
+                                    <td><strong>${q.quiz_title}</strong></td>
+                                    <td>${q.score.toFixed(1)}</td>
+                                    <td>${formatTime(q.time_taken)}</td>
+                                    <td>${q.rank}/${q.total_participants}</td>
+                                    <td style="font-size:0.85rem; color: var(--text-muted)">${formatDate(q.submitted_at)}</td>
+                                    <td>
+                                        <div class="btn-group">
+                                            <a href="/results/${q.submission_id}" class="btn btn-secondary btn-sm">Details</a>
+                                            <a href="/leaderboard/${q.quiz_id}" class="btn btn-secondary btn-sm">🏆 Leaderboard</a>
+                                        </div>
+                                    </td>
+                                </tr>
+                            `).join('')}
+                        </tbody>
+                    </table>
+                </div>`;
+        });
+    </script>
+</body>
+</html>

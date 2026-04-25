@@ -1,0 +1,295 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Quiz Builder — Quiz Platform</title>
+    <link rel="stylesheet" href="/admin/static/css/styles.css">
+    <style>
+        .question-card { background: var(--bg-glass); border: 1px solid var(--border-glass); border-radius: var(--radius-md); padding: 1.5rem; margin-bottom: 1rem; transition: var(--transition); }
+        .question-card:hover { border-color: rgba(99,102,241,0.2); }
+        .question-card .question-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 1rem; }
+        .question-number { font-family: 'Outfit', sans-serif; font-weight: 700; color: var(--accent-primary); }
+        .option-row { display: flex; gap: 0.75rem; align-items: center; margin-bottom: 0.5rem; }
+        .option-row input[type="text"] { flex: 1; }
+        .option-row label { display: flex; align-items: center; gap: 0.4rem; font-size: 0.85rem; color: var(--text-secondary); cursor: pointer; white-space: nowrap; }
+        .share-section { background: rgba(99,102,241,0.1); border: 1px solid rgba(99,102,241,0.2); border-radius: var(--radius-md); padding: 1.5rem; margin-bottom: 2rem; }
+        .share-url { background: var(--bg-glass); padding: 0.75rem 1rem; border-radius: var(--radius-sm); font-family: monospace; font-size: 0.85rem; word-break: break-all; color: var(--text-accent); }
+    </style>
+</head>
+<body>
+    <div class="page-container">
+        <nav class="navbar">
+            <a href="/admin" class="navbar-brand">⚡ QuizPlatform</a>
+            <div class="navbar-links">
+                <a href="/admin">Dashboard</a>
+                <button onclick="logout()">Logout</button>
+            </div>
+        </nav>
+
+        <div class="page-content medium">
+            <h1 class="mb-3" id="page-title">Create New Quiz</h1>
+
+            <!-- Share link (shown after save) -->
+            <div class="share-section hidden" id="share-section">
+                <div class="flex justify-between items-center mb-1">
+                    <strong>Share Link</strong>
+                    <button class="btn btn-sm btn-primary" id="copy-link-btn">📋 Copy Link</button>
+                </div>
+                <div class="share-url" id="share-url"></div>
+            </div>
+
+            <!-- Quiz Metadata -->
+            <div class="card mb-3">
+                <h2 class="card-title mb-2">Quiz Details</h2>
+                <div class="form-group">
+                    <label class="form-label" for="quiz-title">Title</label>
+                    <input type="text" id="quiz-title" class="form-input" placeholder="e.g. Data Structures Mid-Term" required>
+                </div>
+                <div class="form-group">
+                    <label class="form-label" for="quiz-desc">Description</label>
+                    <textarea id="quiz-desc" class="form-textarea" placeholder="Brief description of this quiz"></textarea>
+                </div>
+                <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 1rem;">
+                    <div class="form-group">
+                        <label class="form-label" for="quiz-time">Time Limit (minutes)</label>
+                        <input type="number" id="quiz-time" class="form-input" value="30" min="1" required>
+                    </div>
+                    <div class="form-group">
+                        <label class="form-label" for="quiz-expiry">Expiry Date (optional)</label>
+                        <input type="datetime-local" id="quiz-expiry" class="form-input">
+                    </div>
+                </div>
+                <button class="btn btn-primary" id="save-quiz-btn" onclick="saveQuiz()">Save Quiz</button>
+            </div>
+
+            <!-- Questions -->
+            <div class="card" id="questions-section">
+                <div class="card-header">
+                    <h2 class="card-title">Questions</h2>
+                    <div class="btn-group">
+                        <button class="btn btn-sm btn-secondary" onclick="addQuestion('mcq_single')">+ MCQ Single</button>
+                        <button class="btn btn-sm btn-secondary" onclick="addQuestion('mcq_multi')">+ MCQ Multi</button>
+                        <button class="btn btn-sm btn-secondary" onclick="addQuestion('tf')">+ True/False</button>
+                        <button class="btn btn-sm btn-secondary" onclick="addQuestion('text')">+ Text Input</button>
+                    </div>
+                </div>
+                <div id="questions-container">
+                    <p class="text-muted text-center" id="no-questions">Save the quiz first, then add questions</p>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script src="/admin/static/js/utils.js"></script>
+    <script>
+        let quizId = null;
+        let questions = [];
+
+        document.addEventListener('DOMContentLoaded', async () => {
+            const user = await checkAuthAndRedirect();
+            if (!user || user.role !== 'admin') { window.location.href = '/login'; return; }
+
+            // Check if editing existing quiz
+            const pathParts = window.location.pathname.split('/');
+            const id = pathParts[pathParts.length - 1];
+            if (id && !isNaN(id)) {
+                quizId = parseInt(id);
+                document.getElementById('page-title').textContent = 'Edit Quiz';
+                loadQuiz();
+            }
+        });
+
+        async function loadQuiz() {
+            const res = await fetchAPI(`/api/quizzes/${quizId}`);
+            if (!res || !res.ok) { showToast('Quiz not found', 'error'); return; }
+            const quiz = await res.json();
+
+            document.getElementById('quiz-title').value = quiz.title;
+            document.getElementById('quiz-desc').value = quiz.description || '';
+            document.getElementById('quiz-time').value = quiz.time_limit;
+            if (quiz.expires_at) document.getElementById('quiz-expiry').value = quiz.expires_at.slice(0, 16);
+
+            // Show share link
+            showShareLink(quiz.share_token);
+
+            // Load questions
+            questions = quiz.questions.sort((a, b) => a.order_index - b.order_index);
+            document.getElementById('no-questions').classList.add('hidden');
+            renderQuestions();
+        }
+
+        function showShareLink(token) {
+            const section = document.getElementById('share-section');
+            const url = window.location.origin + '/quiz/' + token;
+            document.getElementById('share-url').textContent = url;
+            section.classList.remove('hidden');
+            document.getElementById('copy-link-btn').onclick = () => copyToClipboard(url);
+        }
+
+        async function saveQuiz() {
+            const title = document.getElementById('quiz-title').value.trim();
+            const desc = document.getElementById('quiz-desc').value.trim();
+            const time = parseInt(document.getElementById('quiz-time').value);
+            const expiry = document.getElementById('quiz-expiry').value || null;
+
+            if (!title) { showToast('Title is required', 'error'); return; }
+
+            const body = { title, description: desc, time_limit: time, expires_at: expiry };
+            const btn = document.getElementById('save-quiz-btn');
+            btn.disabled = true;
+
+            try {
+                let res;
+                if (quizId) {
+                    res = await fetchAPI(`/api/quizzes/${quizId}`, { method: 'PUT', body: JSON.stringify(body) });
+                } else {
+                    res = await fetchAPI('/api/quizzes', { method: 'POST', body: JSON.stringify(body) });
+                }
+
+                if (res && res.ok) {
+                    const quiz = await res.json();
+                    quizId = quiz.id;
+                    showShareLink(quiz.share_token);
+                    document.getElementById('no-questions').textContent = 'Add questions using the buttons above';
+                    showToast('Quiz saved!', 'success');
+                    history.replaceState(null, '', `/admin/quiz-builder/${quizId}`);
+                } else {
+                    const err = await res.json();
+                    showToast(err.detail || 'Save failed', 'error');
+                }
+            } catch (e) { showToast('Connection error', 'error'); }
+            btn.disabled = false;
+        }
+
+        function renderQuestions() {
+            const container = document.getElementById('questions-container');
+            if (questions.length === 0) {
+                container.innerHTML = '<p class="text-muted text-center">No questions added yet</p>';
+                return;
+            }
+
+            container.innerHTML = questions.map((q, i) => {
+                let optionsHTML = '';
+                if (q.type === 'tf') {
+                    optionsHTML = (q.options || []).map(o =>
+                        `<div class="option-row">
+                            <input type="text" class="form-input" value="${o.text}" disabled style="flex:1">
+                            <label><input type="checkbox" ${o.is_correct ? 'checked' : ''} disabled> Correct</label>
+                        </div>`
+                    ).join('');
+                } else if (q.type !== 'text') {
+                    optionsHTML = (q.options || []).map(o =>
+                        `<div class="option-row">
+                            <input type="text" class="form-input" value="${o.text}" disabled style="flex:1">
+                            <label><input type="checkbox" ${o.is_correct ? 'checked' : ''} disabled> Correct</label>
+                        </div>`
+                    ).join('');
+                }
+
+                const typeLabels = { mcq_single: 'MCQ (Single)', mcq_multi: 'MCQ (Multi)', tf: 'True/False', text: 'Text Input' };
+
+                return `
+                    <div class="question-card">
+                        <div class="question-header">
+                            <span class="question-number">Q${i + 1} — <span class="badge badge-purple">${typeLabels[q.type] || q.type}</span></span>
+                            <div class="btn-group">
+                                <button class="btn btn-danger btn-sm" onclick="deleteQuestion(${q.id})">Delete</button>
+                            </div>
+                        </div>
+                        <p style="margin-bottom: 0.75rem;">${q.text}</p>
+                        ${optionsHTML}
+                    </div>`;
+            }).join('');
+        }
+
+        async function addQuestion(type) {
+            if (!quizId) { showToast('Save the quiz first', 'warning'); return; }
+
+            const typeLabels = { mcq_single: 'MCQ (Single Answer)', mcq_multi: 'MCQ (Multiple Answers)', tf: 'True/False', text: 'Text Input' };
+
+            // Build a form modal
+            const overlay = document.createElement('div');
+            overlay.className = 'modal-overlay active';
+            overlay.innerHTML = `
+                <div class="modal" style="max-width: 600px;">
+                    <h3 class="modal-title">Add ${typeLabels[type]} Question</h3>
+                    <div class="form-group">
+                        <label class="form-label">Question Text</label>
+                        <textarea id="new-q-text" class="form-textarea" placeholder="Enter your question"></textarea>
+                    </div>
+                    <div id="options-area">
+                        ${type === 'text' ? '<p class="text-muted">Text input — no options needed</p>' : ''}
+                        ${type === 'tf' ? `
+                            <div class="option-row"><input type="text" class="form-input" value="True" readonly><label><input type="radio" name="correct" value="0" checked> Correct</label></div>
+                            <div class="option-row"><input type="text" class="form-input" value="False" readonly><label><input type="radio" name="correct" value="1"> Correct</label></div>
+                        ` : ''}
+                        ${(type === 'mcq_single' || type === 'mcq_multi') ? `
+                            <label class="form-label">Options</label>
+                            <div id="options-list">
+                                <div class="option-row"><input type="text" class="form-input opt-text" placeholder="Option A"><label><input type="${type === 'mcq_single' ? 'radio' : 'checkbox'}" name="correct" class="opt-correct"> Correct</label></div>
+                                <div class="option-row"><input type="text" class="form-input opt-text" placeholder="Option B"><label><input type="${type === 'mcq_single' ? 'radio' : 'checkbox'}" name="correct" class="opt-correct"> Correct</label></div>
+                            </div>
+                            <button class="btn btn-sm btn-secondary mt-1" onclick="document.getElementById('options-list').insertAdjacentHTML('beforeend', '<div class=\\'option-row\\'><input type=\\'text\\' class=\\'form-input opt-text\\' placeholder=\\'Option\\'><label><input type=\\'${type === 'mcq_single' ? 'radio' : 'checkbox'}\\' name=\\'correct\\' class=\\'opt-correct\\'> Correct</label></div>')">+ Add Option</button>
+                        ` : ''}
+                    </div>
+                    <div class="modal-actions">
+                        <button class="btn btn-secondary" onclick="this.closest('.modal-overlay').remove()">Cancel</button>
+                        <button class="btn btn-primary" id="save-q-btn">Add Question</button>
+                    </div>
+                </div>`;
+            document.body.appendChild(overlay);
+
+            document.getElementById('save-q-btn').onclick = async () => {
+                const text = document.getElementById('new-q-text').value.trim();
+                if (!text) { showToast('Enter question text', 'error'); return; }
+
+                let options = [];
+                if (type === 'tf') {
+                    const radios = overlay.querySelectorAll('input[name="correct"]');
+                    options = [
+                        { text: 'True', is_correct: radios[0].checked },
+                        { text: 'False', is_correct: radios[1].checked },
+                    ];
+                } else if (type === 'mcq_single' || type === 'mcq_multi') {
+                    const texts = overlay.querySelectorAll('.opt-text');
+                    const checks = overlay.querySelectorAll('.opt-correct');
+                    for (let i = 0; i < texts.length; i++) {
+                        if (texts[i].value.trim()) {
+                            options.push({ text: texts[i].value.trim(), is_correct: checks[i].checked });
+                        }
+                    }
+                    if (options.length < 2) { showToast('Add at least 2 options', 'error'); return; }
+                    if (!options.some(o => o.is_correct)) { showToast('Mark at least one correct answer', 'error'); return; }
+                }
+
+                const res = await fetchAPI(`/api/quizzes/${quizId}/questions`, {
+                    method: 'POST',
+                    body: JSON.stringify({ type, text, options }),
+                });
+
+                if (res && res.ok) {
+                    const q = await res.json();
+                    questions.push(q);
+                    renderQuestions();
+                    overlay.remove();
+                    showToast('Question added!', 'success');
+                } else {
+                    const err = await res.json();
+                    showToast(err.detail || 'Failed', 'error');
+                }
+            };
+        }
+
+        async function deleteQuestion(qId) {
+            if (!confirm('Delete this question?')) return;
+            const res = await fetchAPI(`/api/quizzes/${quizId}/questions/${qId}`, { method: 'DELETE' });
+            if (res && res.ok) {
+                questions = questions.filter(q => q.id !== qId);
+                renderQuestions();
+                showToast('Question deleted', 'success');
+            }
+        }
+    </script>
+</body>
+</html>

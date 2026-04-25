@@ -1,0 +1,95 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Login — Quiz Platform</title>
+    <meta name="description" content="Login to the Quiz Platform">
+    <link rel="stylesheet" href="/static/css/styles.css">
+</head>
+<body>
+    <div class="auth-container">
+        <div class="auth-card">
+            <div class="auth-logo">⚡ QuizPlatform</div>
+            <h1 class="auth-title">Welcome Back</h1>
+            <p class="auth-subtitle">Sign in to your account</p>
+
+            <form id="login-form">
+                <div class="form-group">
+                    <label class="form-label" for="email">Email</label>
+                    <input type="email" id="email" class="form-input" placeholder="you@example.com" required>
+                </div>
+                <div class="form-group">
+                    <label class="form-label" for="password">Password</label>
+                    <input type="password" id="password" class="form-input" placeholder="Your password" required>
+                </div>
+                <button type="submit" class="btn btn-primary btn-block btn-lg" id="submit-btn">Sign In</button>
+            </form>
+
+            <div class="auth-footer">
+                Don't have an account? <a href="/register">Register here</a>
+            </div>
+        </div>
+    </div>
+
+    <script src="/static/js/utils.js"></script>
+    <script>
+        document.addEventListener('DOMContentLoaded', async () => {
+            // Check if admin exists; if not, redirect to setup
+            try {
+                const res = await fetch('/api/auth/check-setup');
+                const data = await res.json();
+                if (!data.admin_exists) {
+                    window.location.href = '/setup';
+                    return;
+                }
+            } catch (e) {}
+
+            // If already logged in, redirect
+            const token = getToken();
+            if (token) {
+                const user = await getCurrentUser();
+                if (user) {
+                    window.location.href = user.role === 'admin' ? '/admin' : '/dashboard';
+                    return;
+                }
+            }
+        });
+
+        document.getElementById('login-form').addEventListener('submit', async (e) => {
+            e.preventDefault();
+            const btn = document.getElementById('submit-btn');
+            btn.disabled = true;
+            btn.textContent = 'Signing in...';
+
+            try {
+                const res = await fetch('/api/auth/login', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        email: document.getElementById('email').value,
+                        password: document.getElementById('password').value,
+                    }),
+                });
+
+                const data = await res.json();
+                if (res.ok) {
+                    setToken(data.access_token);
+                    const user = await getCurrentUser();
+                    showToast('Login successful!', 'success');
+                    setTimeout(() => {
+                        window.location.href = user.role === 'admin' ? '/admin' : '/dashboard';
+                    }, 300);
+                } else {
+                    showToast(data.detail || 'Login failed', 'error');
+                }
+            } catch (err) {
+                showToast('Connection error', 'error');
+            }
+
+            btn.disabled = false;
+            btn.textContent = 'Sign In';
+        });
+    </script>
+</body>
+</html>

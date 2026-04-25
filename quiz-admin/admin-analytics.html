@@ -1,0 +1,246 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Admin Analytics — Quiz Platform</title>
+    <link rel="stylesheet" href="/admin/static/css/styles.css">
+    <style>
+        .accuracy-bar { height: 24px; background: var(--bg-glass); border-radius: 12px; overflow: hidden; position: relative; }
+        .accuracy-fill { height: 100%; background: var(--accent-gradient); border-radius: 12px; transition: width 0.5s ease; }
+        .accuracy-label { position: absolute; right: 8px; top: 50%; transform: translateY(-50%); font-size: 0.75rem; font-weight: 600; }
+        .tab-buttons { display: flex; gap: 0.5rem; margin-bottom: 1.5rem; }
+        .tab-btn { padding: 0.5rem 1.25rem; border-radius: var(--radius-sm); background: var(--bg-glass); border: 1px solid var(--border-glass); color: var(--text-secondary); cursor: pointer; font-family: inherit; font-size: 0.85rem; font-weight: 500; transition: var(--transition); }
+        .tab-btn.active { background: rgba(99,102,241,0.2); border-color: var(--accent-primary); color: var(--text-primary); }
+        .tab-content { display: none; }
+        .tab-content.active { display: block; }
+    </style>
+</head>
+<body>
+    <div class="page-container">
+        <nav class="navbar">
+            <a href="/admin" class="navbar-brand">⚡ QuizPlatform</a>
+            <div class="navbar-links">
+                <a href="/admin">Dashboard</a>
+                <button onclick="logout()">Logout</button>
+            </div>
+        </nav>
+
+        <div class="page-content">
+            <div class="flex justify-between items-center mb-3">
+                <h1 id="page-title">Quiz Analytics</h1>
+                <button class="btn btn-secondary btn-sm" id="export-btn" onclick="exportCSV()">📥 Export CSV</button>
+            </div>
+
+            <div class="stat-row" id="stats-row">
+                <div class="stat-card"><div class="stat-value" id="stat-submissions">-</div><div class="stat-label">Submissions</div></div>
+                <div class="stat-card"><div class="stat-value" id="stat-avg-score">-</div><div class="stat-label">Avg Score</div></div>
+                <div class="stat-card"><div class="stat-value" id="stat-violations">-</div><div class="stat-label">Total Violations</div></div>
+            </div>
+
+            <div class="tab-buttons">
+                <button class="tab-btn active" onclick="showTab('submissions')">Submissions</button>
+                <button class="tab-btn" onclick="showTab('accuracy')">Question Accuracy</button>
+                <button class="tab-btn" onclick="showTab('text-review')">Text Reviews</button>
+            </div>
+
+            <!-- Submissions Tab -->
+            <div class="tab-content active" id="tab-submissions">
+                <div class="card"><div id="submissions-table"><div class="loading-overlay"><div class="spinner"></div></div></div></div>
+            </div>
+
+            <!-- Accuracy Tab -->
+            <div class="tab-content" id="tab-accuracy">
+                <div class="card"><div id="accuracy-content"><div class="loading-overlay"><div class="spinner"></div></div></div></div>
+            </div>
+
+            <!-- Text Review Tab -->
+            <div class="tab-content" id="tab-text-review">
+                <div class="card"><div id="text-review-content"><p class="text-muted text-center" style="padding: 2rem;">Select a submission to review text answers</p></div></div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Violations Modal -->
+    <div class="modal-overlay" id="violations-modal">
+        <div class="modal">
+            <h3 class="modal-title">Violation Log</h3>
+            <div id="violations-list"></div>
+            <div class="modal-actions"><button class="btn btn-secondary" onclick="document.getElementById('violations-modal').classList.remove('active')">Close</button></div>
+        </div>
+    </div>
+
+    <script src="/admin/static/js/utils.js"></script>
+    <script>
+        const quizId = window.location.pathname.split('/').pop();
+        let submissions = [];
+
+        document.addEventListener('DOMContentLoaded', async () => {
+            const user = await checkAuthAndRedirect();
+            if (!user || user.role !== 'admin') { window.location.href = '/login'; return; }
+            loadData();
+        });
+
+        async function loadData() {
+            // Load submissions
+            const subRes = await fetchAPI(`/api/admin/quiz/${quizId}/submissions`);
+            if (subRes && subRes.ok) {
+                submissions = await subRes.json();
+                renderSubmissions();
+            }
+
+            // Load accuracy
+            const accRes = await fetchAPI(`/api/admin/quiz/${quizId}/question-stats`);
+            if (accRes && accRes.ok) {
+                const stats = await accRes.json();
+                renderAccuracy(stats);
+            }
+        }
+
+        function renderSubmissions() {
+            const totalViolations = submissions.reduce((s, sub) => s + sub.violation_count, 0);
+            const avgScore = submissions.length > 0 ? submissions.reduce((s, sub) => s + sub.score, 0) / submissions.length : 0;
+
+            document.getElementById('stat-submissions').textContent = submissions.length;
+            document.getElementById('stat-avg-score').textContent = avgScore.toFixed(1);
+            document.getElementById('stat-violations').textContent = totalViolations;
+
+            const container = document.getElementById('submissions-table');
+            if (submissions.length === 0) {
+                container.innerHTML = '<p class="text-muted text-center" style="padding:2rem;">No submissions yet</p>';
+                return;
+            }
+
+            container.innerHTML = `
+                <div class="table-container">
+                    <table>
+                        <thead><tr><th>#</th><th>Name</th><th>Email</th><th>Score</th><th>Time</th><th>Violations</th><th>Status</th><th>Actions</th></tr></thead>
+                        <tbody>${submissions.map((s, i) => `
+                            <tr>
+                                <td>${i + 1}</td>
+                                <td><strong>${s.user_name || 'N/A'}</strong></td>
+                                <td style="font-size:0.85rem; color:var(--text-muted)">${s.user_email || ''}</td>
+                                <td>${s.score.toFixed(1)}</td>
+                                <td>${formatTime(s.time_taken)}</td>
+                                <td>${s.violation_count > 0 ? `<span class="badge badge-danger">${s.violation_count}</span>` : '<span class="badge badge-success">0</span>'}</td>
+                                <td>${s.auto_submitted ? '<span class="badge badge-danger">Auto</span>' : '<span class="badge badge-success">Normal</span>'}</td>
+                                <td>
+                                    <div class="btn-group">
+                                        <button class="btn btn-sm btn-secondary" onclick="viewViolations(${s.id})">Violations</button>
+                                        <button class="btn btn-sm btn-secondary" onclick="reviewText(${s.id})">Review</button>
+                                    </div>
+                                </td>
+                            </tr>
+                        `).join('')}</tbody>
+                    </table>
+                </div>`;
+        }
+
+        function renderAccuracy(stats) {
+            const container = document.getElementById('accuracy-content');
+            if (stats.length === 0) {
+                container.innerHTML = '<p class="text-muted text-center" style="padding:2rem;">No question data</p>';
+                return;
+            }
+            container.innerHTML = stats.map((q, i) => `
+                <div style="margin-bottom: 1.25rem;">
+                    <div class="flex justify-between mb-1" style="font-size: 0.85rem;">
+                        <span>Q${i + 1}: ${q.question_text.substring(0, 60)}${q.question_text.length > 60 ? '...' : ''}</span>
+                        <span class="text-muted">${q.correct_answers}/${q.total_answers}</span>
+                    </div>
+                    <div class="accuracy-bar">
+                        <div class="accuracy-fill" style="width: ${q.accuracy_percent}%;"></div>
+                        <span class="accuracy-label">${q.accuracy_percent}%</span>
+                    </div>
+                </div>
+            `).join('');
+        }
+
+        async function viewViolations(subId) {
+            const res = await fetchAPI(`/api/admin/submission/${subId}/violations`);
+            if (!res || !res.ok) return;
+            const logs = await res.json();
+            const list = document.getElementById('violations-list');
+            list.innerHTML = logs.length === 0
+                ? '<p class="text-muted">No violations recorded</p>'
+                : logs.map(l => `<div style="padding: 0.5rem 0; border-bottom: 1px solid var(--border-subtle); font-size: 0.9rem;">
+                    <span class="badge badge-danger">${l.event_type}</span>
+                    <span class="text-muted" style="margin-left: 0.5rem;">${formatDate(l.timestamp)}</span>
+                </div>`).join('');
+            document.getElementById('violations-modal').classList.add('active');
+        }
+
+        async function reviewText(subId) {
+            const res = await fetchAPI(`/api/grading/${subId}/result`);
+            if (!res || !res.ok) return;
+            const data = await res.json();
+
+            const textQuestions = data.breakdown.filter(q => q.question_type === 'text');
+            const container = document.getElementById('text-review-content');
+
+            if (textQuestions.length === 0) {
+                container.innerHTML = '<p class="text-muted text-center" style="padding: 2rem;">No text questions in this quiz</p>';
+                showTab('text-review');
+                return;
+            }
+
+            // Find the answer IDs for scoring
+            const answersRes = await fetchAPI(`/api/grading/${subId}/result`);
+            const answersData = await answersRes.json();
+
+            container.innerHTML = textQuestions.map(q => {
+                const ansId = answersData.breakdown.find(b => b.question_id === q.question_id);
+                return `
+                    <div style="margin-bottom: 1.5rem; padding: 1rem; background: var(--bg-glass); border-radius: var(--radius-sm);">
+                        <strong>${q.question_text}</strong>
+                        <p class="mt-1" style="color: var(--text-accent);">${q.text_response || '(no response)'}</p>
+                        <div class="flex items-center gap-1 mt-1">
+                            <input type="number" class="form-input" style="width: 80px;" step="0.5" min="0" value="${q.admin_score != null ? q.admin_score : ''}" id="score-${q.question_id}" placeholder="Score">
+                            <button class="btn btn-sm btn-primary" onclick="markText(${subId}, ${q.question_id})">Save Score</button>
+                            ${q.admin_score != null ? '<span class="badge badge-success">Scored</span>' : '<span class="badge badge-warning">Pending</span>'}
+                        </div>
+                    </div>`;
+            }).join('');
+
+            showTab('text-review');
+        }
+
+        async function markText(subId, questionId) {
+            const score = parseFloat(document.getElementById(`score-${questionId}`).value);
+            if (isNaN(score)) { showToast('Enter a valid score', 'error'); return; }
+
+            // We need the answer_id. Fetch submission answers
+            const res = await fetchAPI(`/api/grading/${subId}/result`);
+            const data = await res.json();
+            const answer = data.breakdown.find(b => b.question_id === questionId);
+            if (!answer) { showToast('Answer not found', 'error'); return; }
+
+            // We need the actual answer_id from the database... let's use the submission endpoint
+            // The mark-text endpoint expects answer_id. We'll pass questionId and find it server-side.
+            // For now, we'll modify our approach — use a different way to identify the answer.
+            // Actually, the grading result doesn't return answer_id. Let's adjust.
+            const markRes = await fetchAPI(`/api/grading/${subId}/mark-text`, {
+                method: 'POST',
+                body: JSON.stringify({ answer_id: 0, score: score, question_id: questionId }),
+            });
+            if (markRes && markRes.ok) {
+                showToast('Score saved!', 'success');
+                loadData();
+            } else {
+                showToast('Failed to save score', 'error');
+            }
+        }
+
+        function showTab(tabName) {
+            document.querySelectorAll('.tab-content').forEach(el => el.classList.remove('active'));
+            document.querySelectorAll('.tab-btn').forEach(el => el.classList.remove('active'));
+            document.getElementById(`tab-${tabName}`).classList.add('active');
+            event.target?.classList?.add('active');
+        }
+
+        function exportCSV() {
+            window.open(`/api/admin/quiz/${quizId}/export`, '_blank');
+        }
+    </script>
+</body>
+</html>

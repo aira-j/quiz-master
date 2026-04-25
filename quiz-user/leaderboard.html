@@ -1,0 +1,98 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Leaderboard — Quiz Platform</title>
+    <link rel="stylesheet" href="/static/css/styles.css">
+    <style>
+        .podium { display: flex; justify-content: center; align-items: flex-end; gap: 1rem; margin: 2rem 0; }
+        .podium-item { text-align: center; border-radius: var(--radius-md) var(--radius-md) 0 0; padding: 1.5rem 1rem 1rem; min-width: 120px; }
+        .podium-item.gold { background: linear-gradient(135deg, rgba(255,215,0,0.2), rgba(255,215,0,0.05)); border: 1px solid rgba(255,215,0,0.3); min-height: 180px; }
+        .podium-item.silver { background: linear-gradient(135deg, rgba(192,192,192,0.2), rgba(192,192,192,0.05)); border: 1px solid rgba(192,192,192,0.3); min-height: 150px; }
+        .podium-item.bronze { background: linear-gradient(135deg, rgba(205,127,50,0.2), rgba(205,127,50,0.05)); border: 1px solid rgba(205,127,50,0.3); min-height: 120px; }
+        .podium-rank { font-family: 'Outfit'; font-size: 2rem; font-weight: 800; }
+        .podium-name { font-weight: 600; margin-top: 0.5rem; font-size: 0.9rem; }
+        .podium-score { font-size: 0.8rem; color: var(--text-secondary); }
+        .highlight-row { background: rgba(99,102,241,0.1) !important; }
+    </style>
+</head>
+<body>
+    <div class="page-container">
+        <nav class="navbar">
+            <a href="/" class="navbar-brand">⚡ QuizPlatform</a>
+            <div class="navbar-links">
+                <a href="/dashboard">Dashboard</a>
+                <button onclick="logout()">Logout</button>
+            </div>
+        </nav>
+
+        <div class="page-content medium">
+            <h1 class="text-center mb-3">🏆 Leaderboard</h1>
+
+            <div id="loading" class="loading-overlay"><div class="spinner"></div></div>
+
+            <div id="content" class="hidden">
+                <div class="podium" id="podium"></div>
+                <div class="card">
+                    <div class="table-container">
+                        <table>
+                            <thead><tr><th>Rank</th><th>Name</th><th>Score</th><th>Time</th></tr></thead>
+                            <tbody id="table-body"></tbody>
+                        </table>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script src="/static/js/utils.js"></script>
+    <script>
+        const quizId = window.location.pathname.split('/').pop();
+        let currentUserId = null;
+
+        document.addEventListener('DOMContentLoaded', async () => {
+            const user = await checkAuthAndRedirect();
+            if (!user) return;
+            currentUserId = user.id;
+
+            const res = await fetchAPI(`/api/grading/${quizId}/leaderboard`);
+            if (!res || !res.ok) {
+                const err = await res.json();
+                showToast(err.detail || 'Cannot load leaderboard', 'error');
+                return;
+            }
+
+            const entries = await res.json();
+            document.getElementById('loading').classList.add('hidden');
+            document.getElementById('content').classList.remove('hidden');
+
+            // Podium (top 3)
+            const podium = document.getElementById('podium');
+            const medals = ['🥇', '🥈', '🥉'];
+            const classes = ['gold', 'silver', 'bronze'];
+            const top3 = entries.slice(0, 3);
+            // Show in order: 2nd, 1st, 3rd
+            const podiumOrder = top3.length >= 2 ? [top3[1], top3[0], top3[2]].filter(Boolean) : top3;
+            podium.innerHTML = podiumOrder.map(e => {
+                const idx = top3.indexOf(e);
+                return `<div class="podium-item ${classes[idx]}">
+                    <div class="podium-rank">${medals[idx]}</div>
+                    <div class="podium-name">${e.user_name}</div>
+                    <div class="podium-score">${e.score.toFixed(1)} pts • ${formatTime(e.time_taken)}</div>
+                </div>`;
+            }).join('');
+
+            // Full table
+            document.getElementById('table-body').innerHTML = entries.map(e => `
+                <tr class="${e.user_id === currentUserId ? 'highlight-row' : ''}">
+                    <td><strong>${e.rank}</strong></td>
+                    <td>${e.user_name} ${e.user_id === currentUserId ? '<span class="badge badge-purple">You</span>' : ''}</td>
+                    <td>${e.score.toFixed(1)}</td>
+                    <td>${formatTime(e.time_taken)}</td>
+                </tr>
+            `).join('');
+        });
+    </script>
+</body>
+</html>
