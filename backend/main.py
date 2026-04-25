@@ -10,7 +10,7 @@ from .routes import auth_routes, quiz_routes, session_routes, grading_routes, da
 # Create database tables
 models.Base.metadata.create_all(bind=engine)
 
-app = FastAPI(title="Quiz Platform API", version="2.0")
+app = FastAPI(title="Quiz Master API", version="2.0")
 
 # CORS — allow all origins for development
 app.add_middleware(
